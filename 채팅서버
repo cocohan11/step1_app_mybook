@@ -1,0 +1,386 @@
+import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+public class android_server_mybook {
+        /**
+          [ 소켓 프로그래밍 절차 ]
+
+                <서버>
+            1. 소켓생성
+            2. 소켓에 주소할당
+            3. 연결요청 대기
+            4. 연결 허용
+            5. 데이터 송수신
+            6. 연결 종료
+
+              <클라이언트>
+            1. 소켓 생성
+            2. 연결요청
+            3. 데이터 송수신
+            4. 연결 종료
+        **/
+
+    Map<String, Club> Map_club = new HashMap(); // 모든 방의 모임. 방번호(외래키)를 key로 가짐
+    Connection conn;
+    Statement stmt, stmt2; // select문
+    PreparedStatement stmt_chat; // insert/delete/update 문
+    ResultSet rs, rs2;
+    int ret;
+    //ㅡㅡㅡㅡㅡㅡ
+    // 실제 run
+    //ㅡㅡㅡㅡㅡㅡ
+    public static void main(String[] args) throws SQLException {
+        new android_server_mybook().serverStart();
+    }
+
+
+
+    public android_server_mybook() throws SQLException {
+        //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+        // DB에 접속하기 위한 재료
+        String url = "jdbc:mysql://iamhere.cdf5mmjsw63q.ap-northeast-2.rds.amazonaws.com:3306/myBook"; // 접속할 서버의 mysql주소
+        String userName = "han"; // root말고 han계정으로 들어갔음
+        String password = "jo811275";
+
+        // Mysql 연결
+        conn = DriverManager.getConnection(url, userName, password);
+
+        // 쿼리작성을 위한 객체 생성
+        stmt = conn.createStatement();
+
+        // 쿼리 작성
+        String sql = "SELECT id, name, master_email, turnout FROM Club;"; // 입장가능한 방 불러오기
+        System.out.println("sql : "+sql);
+
+
+        // 쿼리 수행
+        rs = stmt.executeQuery(sql); // 쿼리 날리기
+        System.out.println("rs : "+rs);
+        //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+    }
+
+
+
+    //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+    // 서버시작과 소켓통신중
+    //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+    public void serverStart() {
+
+        ServerSocket serverSocket = null; // 연결 요청을 기다리면서 요청오면 수락하는 역할(통신x)
+        Socket socket; // 클라이언트에서 넘겨준 소켓, 지금은 null
+
+        try {
+            serverSocket = new ServerSocket(7777); // 현재 ip의 7777포트에 서버소켓을 생성한다. // erorr: 8888포트는 이미 쓰고있다함
+            System.out.println("서버 시작. 대기중....");
+
+
+            // 모든 방이 담긴 배열 생성하기
+            while(rs.next()){
+                String ClubNum = String.valueOf(rs.getInt(1));
+                String ClubName = rs.getString(2);
+                String ClubMasterEmail = rs.getString(3);
+//                int ClubTurnOut = rs.getInt(4); // db에서 본 모임참여자수
+
+
+                Club club = new Club(ClubName, ClubMasterEmail, new ArrayList<ClientInfo>()); // (방id, 방장, 클라들) // 아직 접속한 클라이언트가 없으니 가짜로 공간만 만듦
+                Map_club.put(ClubNum, club); // 방 1개씩 담김 (방번호, 방정보)
+                System.out.println("ClubNum:"+ClubNum+"/ ClubName:"+ClubName); // 1.딸바 2.토마토 ...
+
+
+                // 쿼리작성을 위한 객체 생성2 (1쿼리 1결과라서 생성함)
+                stmt2 = conn.createStatement();
+                // 쿼리 작성2
+                String sql2 =
+                        "SELECT U.userEmail, U.userImg, U.userName " +
+                        "FROM User AS U " +
+                        "JOIN ClubMembers AS CM " +
+                        "ON U.userEmail = CM.userEmail " +
+                        "WHERE CM.ClubKey ="+ClubNum+";";
+                System.out.println("sql2 : "+sql2);
+                // 쿼리 수행
+                rs2 = stmt2.executeQuery(sql2); // 쿼리 날리기
+                while(rs2.next()){
+                    String userEmail = String.valueOf(rs2.getString(1));
+                    String userImg = rs2.getString(2);
+                    String userName = rs2.getString(3);
+
+
+                    ClientInfo client = new ClientInfo(null, ClubNum, "db", userEmail, userName, userImg, "db chat");
+                    Map_club.get(ClubNum).getArrayList().add(client); // 방 1개씩 담김 (방번호, 방정보)
+
+
+                    System.out.println("client:"+client);
+                }
+            }
+//            System.out.println("Map_club : "+Map_club); // 직전에 안드로이드단에서 방장이 만든 방이 insert 되었을거임
+            System.out.println("1 Map_club size:"+Map_club.size()+"/Map_club:"+Map_club);
+
+
+
+            //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+            // 소켓 통신 대기 ~ing
+            //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+            while (true) {
+                // 클라이언트의 접속을 대기한다.
+                System.out.println("소켓 통신 대기 ~ing");
+                socket = serverSocket.accept(); // 서버소켓으로 연결이 들어오면 소켓에 넘겨준다. 서버의 소켓과 클라의 소켓이 연결된다.
+                System.out.println("["+socket.getInetAddress()+" : "+socket.getPort()+"] 에서 접속하였습니다.");
+
+
+                // 메시지 전송 처리를 하는 쓰레드 생성 및 실행
+                android_server_mybook.Server_oneSocket receiver = new android_server_mybook.Server_oneSocket(socket); // 소켓을 통해 메세지를 전달하는 스레드 시작
+                receiver.start();
+                System.out.println("receiver.start()");
+            }
+
+
+        } catch (IOException | SQLException e) {e.printStackTrace();} finally {
+            if(serverSocket != null) { //서버 소켓 닫기
+                try {
+                    serverSocket.close();
+                } catch (IOException e2) {System.out.println("e2:"+e2);}
+            }
+        }
+
+    }
+
+
+
+    //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+    // 클라이언트 1명과 연결된 소켓통신 스레드 : 한 명의 클라한테 받고 모두에게 보낸다.
+    //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+    class Server_oneSocket extends Thread{
+
+        private Socket socket; // 클라이언트와 연결될 소켓
+        private BufferedReader br;
+//        private String email, name, img, clubNum; // 유저 정보
+        public ClientInfo client;
+
+
+        // 생성자
+        public Server_oneSocket(Socket socket) { // 클라이언트와 1대1연결된 소켓
+            this.socket = socket;
+            try {
+                br = new BufferedReader(new InputStreamReader(socket.getInputStream())); //수신용
+            } catch (IOException e) {e.printStackTrace();}
+        }
+
+
+        @Override
+        public void run() { // ServerReceiver 클래스가 시작할 때 실행될 코드
+            try {
+                //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+                // 소켓통신 ~ing
+                // 한 클라이언트가 보낸 메시지를 다른 모든 클라이언트에게 보내준다.
+                while (br != null) {
+                    System.out.println("ServerReceiver while...");
+                    try {
+                        // 전송받은 메세지
+                        String clubNum = br.readLine();
+                        String purpose = br.readLine();
+                        String email = br.readLine();
+                        String name = br.readLine();
+                        String img = br.readLine();
+                        String chat = br.readLine();
+                        System.out.println("purpose:"+purpose);
+
+
+
+                        // 클라이언트 한 명 생성
+                        client = new ClientInfo(socket, clubNum, purpose, email, name, img, chat); // 스트림으로 받아온 유저정보
+                        System.out.println("클라이언트 한 명 생성 client: "+client);
+
+
+                        whatPurpose(client); // 4가지 경우
+//                        receiveClientInfo(purpose, client_book);
+
+
+                        } catch (EOFException e) {System.out.println("e:"+e);
+                    }
+                } // ~while()
+                //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+            } catch (IOException | SQLException e) {e.printStackTrace();}
+        }
+
+
+
+        public void whatPurpose(ClientInfo client) throws IOException, SQLException {
+            System.out.println("purpose: "+client.getPurpose());
+            System.out.println("2 Map_club size:"+Map_club.size()+"/Map_club:"+Map_club);
+            if (client.getPurpose() != null) {
+                switch (client.getPurpose()) {
+                    case "시작" : // 소켓 넣기
+                        findClientForEmailAndChange(client);
+                        break;
+
+                    case "생성" :
+                        addClub(client);
+                        sendMgsByPrintWriter(client);
+                        break;
+
+
+                    case "가입" : // add 후 메세지보내기
+                        addMsgToHashMapAndDB(client); // 가입 후 자료구조, db에 업뎃
+                        sendMgsByPrintWriter(client); // 가입
+                        break;
+
+                    case "채팅" : // "안녕"
+                        findClientForEmailAndChange(client);
+                        sendMsg_chat(client);
+                        break;
+
+                    case "퇴장" : // "[ㅇㅇ]님이 퇴장했습니다."
+                        findClientForEmailAndChange(client); // 해당 참여자 이메일로 찾아서 명단에서 삭제함
+                        saveLeaveMsgToDB(client); // db에 퇴장메세지 저장
+                        break;
+                }
+            }
+        }
+
+
+
+    } // ~thread class
+
+    // db에 가입/퇴장 저장하기
+    private void saveLeaveMsgToDB(ClientInfo client) throws SQLException, IOException {
+        // 채팅서버 hashMap에 추가
+        String chat = "["+client.getName()+"] 님이 퇴장하셨습니다."; // "[ㅇㅇ]님이 퇴장했습니다."
+        client.setChat(chat);
+
+        insertDB(client);
+        sendMgsByPrintWriter(client); // 클라이언트 서비스에 퇴장함을 전달
+    }
+
+
+    // 방 생성
+    private void addClub(ClientInfo client) throws SQLException {
+        // 채팅서버 hashMap에 추가
+        String chat = "["+client.getName()+"] 님이 입장하셨습니다."; // "[ㅇㅇ]님이 입장했습니다."
+        client.setChat(chat);
+        ArrayList<ClientInfo> clientList = new ArrayList<>();
+        clientList.add(client); // 1명
+
+
+        Club club = new Club(client.getName(), client.getEmail(), clientList); // (방id, 방장, 클라들) // 아직 접속한 클라이언트가 없으니 가짜로 공간만 만듦
+        Map_club.put(client.getClubNum(), club);
+
+
+        insertDB입장(client); // 생성
+    }
+
+
+    // db에 저장하기
+    private void addMsgToHashMapAndDB(ClientInfo client) throws SQLException {
+        // 채팅서버 hashMap에 추가
+        String chat = "["+client.getName()+"] 님이 입장하셨습니다."; // "[ㅇㅇ]님이 입장했습니다."
+        client.setChat(chat);
+        Map_club.get(client.getClubNum()).getArrayList().add(client);
+
+
+        insertDB입장(client);
+    }
+
+    // case "채팅"
+    public void sendMsg_chat(ClientInfo client) throws IOException, SQLException {
+        sendMgsByPrintWriter(client); // 채팅
+
+        // insert at DB
+        // ~~~~~~ 날짜수정하기
+        insertDB(client);
+    }
+
+
+    private void insertDB입장(ClientInfo client) throws SQLException {
+        // 쿼리 작성
+        String sql = "INSERT INTO Chat (ClubKey, chat, email, time, entryPoint) " +
+                "VALUES("+client.getClubNum()+", '"+client.getChat()+"', '"+client.getEmail()+"', '오전10:00', '입장')"; // 채팅 한 개 저장
+        System.out.println("sql_chat : "+sql);
+        stmt_chat = conn.prepareStatement(sql); // 쿼리작성을 위한 객체 생성
+
+
+        // 쿼리 수행
+        ret = stmt_chat.executeUpdate(); // 쿼리 날리기
+        System.out.println("ret(1이어야함): "+ret);
+    }
+    private void insertDB(ClientInfo client) throws SQLException {
+        // 쿼리 작성
+        String sql = "INSERT INTO Chat (ClubKey, chat, email, time) " +
+                "VALUES("+client.getClubNum()+", '"+client.getChat()+"', '"+client.getEmail()+"', '오전10:00')"; // 채팅 한 개 저장
+        System.out.println("sql_chat : "+sql);
+        stmt_chat = conn.prepareStatement(sql); // 쿼리작성을 위한 객체 생성
+
+
+        // 쿼리 수행
+        ret = stmt_chat.executeUpdate(); // 쿼리 날리기
+        System.out.println("ret(1이어야함): "+ret);
+    }
+
+
+    private void findClientForEmailAndChange(ClientInfo client) {
+        System.out.println("findClientForEmailAndRemove()");
+        System.out.println("findClientForEmailAndRemove() 파라미터 : "+client);
+        System.out.println("3 Map_club size:"+Map_club.size()+"/Map_club:"+Map_club);
+        Map_club.forEach((strKey, strValue)-> { // 방num, 방
+            for (int i=0; i<strValue.getArrayList().size(); i++) { // 방의 명단수
+                if(strValue.getArrayList().get(i).getEmail().equals(client.getEmail())){ // Map의 참여자 이메일이 동일하면 다 소켓 넣기
+                    Map_club.get(strKey).getArrayList().get(i).setPurpose(client.getPurpose());
+                    System.out.println("Map_club.get(strKey).getArrayList()"+Map_club.get(strKey).getArrayList());
+
+
+                    switch (client.getPurpose()) {
+                        case "시작" : // socket 넣기
+                            Map_club.get(strKey).getArrayList().get(i).setSocket(client.getSocket());
+                            break;
+                        case "채팅" : // chat 변경
+                            Map_club.get(strKey).getArrayList().get(i).setChat(client.getChat());
+                            break;
+                        case "퇴장" : // 명단에서 삭제
+                            Map_club.get(strKey).getArrayList().remove(i);
+                            break;
+                    }
+                }
+            }
+            System.out.println("4 Map_club size:"+Map_club.size()+"/Map_club:"+Map_club);
+        });
+    }
+
+
+
+    // PrintWriter 메세지 전송하기
+    public void sendMgsByPrintWriter(ClientInfo client) throws IOException {
+        //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+        // 모든 참여자에게 메세지 전달
+        //ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+
+        ArrayList<ClientInfo> this방 = Map_club.get(client.getClubNum()).getArrayList();
+        System.out.println("sendMgsByPrintWriter()");
+        System.out.println("퇴장/입장/가입/채팅/생성하는 사람:"+client);
+        System.out.println("this방 size:"+this방.size());
+        System.out.println("this방 :"+this방);
+//        System.out.println("this방.get(0)getSocket:"+this방.get(0).getSocket());
+
+        for (int i=0; i< this방.size(); i++) { // 해당방에 참여한 한 명 한 명한테 6안내9메세지 전달
+            if (this방.get(i).getSocket() != null) { // 소켓 없는 경우(테스트) 에러나서 추가함
+                PrintWriter pw = new PrintWriter(this방.get(i).getSocket().getOutputStream()); // 여기에 위치해야 함
+                System.out.println("pw:"+pw);
+                pw.println(client.getClubNum());
+                pw.println(client.getPurpose());
+                pw.println(client.getEmail());
+                pw.println(client.getName());
+                pw.println(client.getImg());
+                pw.println(client.getChat());
+                pw.flush(); // 남김없이 전부 송신
+                System.out.println((i+1)+"번째 사람에게 보냄");
+            }
+        }
+    }
+
+
+}
+
+
